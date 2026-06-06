@@ -67,7 +67,8 @@ boox-notes-renderer <input.note> [output]
   Force this font file (TTF/OTF/TTC) for all text, bypassing name resolution.
 
 - `--fonts-dir <dir>`
-  Add a directory to search for fonts. Repeatable.
+  Add a directory to search for fonts (non-recursive). Repeatable; searched
+  before everything else.
 
 - `--map-font "Name=Target"`
   Map a font family the note requests to a host family, e.g.
@@ -84,13 +85,33 @@ boox-notes-renderer <input.note> [output]
 
 ### Font resolution
 
-Fonts are resolved per text box from the family the note requests: a
-`--map-font` override → exact match → a built-in map of the AOSP/Noto fonts
-BOOX ships (`Noto Sans CJK JP`→Hiragino, `Noto Serif`→Times,
-`Roboto`→Helvetica/Arial, …) → a CJK fallback. PDF embeds a glyph subset per
-font, SVG embeds a subset `@font-face` per font, and PNG rasterizes glyph
-outlines. Color emoji are drawn from the platform emoji font (Apple Color
-Emoji, or a downloaded Noto Color Emoji).
+Fonts are resolved per text box from the family the note requests. Name
+candidates are tried in order — a `--map-font` override → the requested
+family itself → a built-in map of the AOSP/Noto fonts BOOX ships
+(`Noto Sans CJK JP`→Hiragino, `Noto Serif`→Times, `Roboto`→Helvetica/Arial,
+…) → a CJK fallback — and each candidate is searched in every place a font
+can come from: the `--fonts-dir` dirs, the `--download-fonts` cache (and a
+Google Fonts download on a miss), then the OS font APIs (Core Text on
+macOS/iOS, DirectWrite on Windows, fontconfig on Linux — the only source of
+system fonts; no font directory is scanned beyond the ones you pass). The OS
+lookup finds fonts living outside any public font directory, e.g. PingFang,
+which modern macOS/iOS keep inside a private framework.
+
+Characters the resolved font has no glyph for fall back per character: to
+the OS's own font fallback, asked with the actual character (the same
+language-settings-aware cascade the platform uses — so kanji follow your
+system language preference, or the language the note's font name implies,
+e.g. `Noto Sans CJK JP` → Japanese shapes), then to a CJK-capable
+last-resort font.
+
+PDF embeds a glyph subset per font, SVG embeds a subset `@font-face` per
+font, and PNG rasterizes glyph outlines. Color emoji are drawn from the
+platform emoji font (Apple Color Emoji, or a downloaded Noto Color Emoji).
+
+The OS font APIs sit behind the `system-fonts` cargo feature, which is in the
+default set. Building the library with `default-features = false` gives a
+pure-Rust build that links no platform libraries; fonts then come only from
+`--fonts-dir` and `--download-fonts`.
 
 ### Examples
 

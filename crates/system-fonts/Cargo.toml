@@ -1,0 +1,24 @@
+[package]
+name = "system-fonts"
+version = "0.1.0"
+edition = "2024"
+description = "Resolve system fonts through the OS font APIs: family name lookup and per-character font fallback, returning font file paths and collection face indices."
+license = "MIT"
+
+# Core Text names a font but not its face index inside a `.ttc`; the name
+# tables are read with ttf-parser (mmapped) to find it. DirectWrite and
+# fontconfig return the index directly, so only Apple needs these.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+memmap2 = "0.9"
+objc2-core-foundation = "0.3"
+objc2-core-text = "0.3"
+ttf-parser = "0.25"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+dwrote = "0.11"
+winapi = { version = "0.3", features = ["dwrite"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+# dlopen: bind fontconfig at runtime, so building (and `cargo check`) needs
+# no fontconfig headers, and hosts without the library degrade gracefully.
+yeslogic-fontconfig-sys = { version = "6", features = ["dlopen"] }

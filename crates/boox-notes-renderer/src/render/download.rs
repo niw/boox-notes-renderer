@@ -1,10 +1,12 @@
 //! Opt-in font download (`--download-fonts`), so the note renders in its
 //! actual fonts instead of a system substitute. Two mechanisms:
 //!
-//! 1. A small curated list ([`ensure`], fetched eagerly): the Noto fonts behind
-//!    the BOOX-specific family names that don't match Google's catalog naming
-//!    ("Noto Sans CJK JP" is "Noto Sans JP" on Google Fonts), plus the color
-//!    emoji font `emoji.rs` needs without any family requesting it.
+//! 1. A small curated list ([`ensure`], fetched eagerly into the cache dir):
+//!    the Noto fonts behind the BOOX family names ("Noto Sans CJK JP" is
+//!    "Noto Sans JP" on Google Fonts — `DEFAULT_MAP` carries the name
+//!    bridge), plus the color emoji font `emoji.rs` needs without any family
+//!    requesting it. The cache dir is then indexed like a `--fonts-dir`, so
+//!    these resolve by their real family names.
 //! 2. The full Google Fonts catalog ([`GoogleFonts`], resolved lazily per
 //!    requested family): the family list from `fonts.google.com/metadata/fonts`
 //!    (cached), then the family's files via `download/list` — so any catalog
@@ -19,35 +21,18 @@ use std::path::{Path, PathBuf};
 
 const BASE: &str = "https://raw.githubusercontent.com/google/fonts/main/ofl";
 
-/// (requested-name patterns, cache filename, URL path under `BASE`).
-const DOWNLOADS: &[(&[&str], &str, &str)] = &[
+/// (cache filename, URL path under `BASE`). The files' internal family names
+/// ("Noto Sans JP", …) are what resolution sees once the cache is indexed.
+const DOWNLOADS: &[(&str, &str)] = &[
+    ("NotoSansJP.ttf", "notosansjp/NotoSansJP%5Bwght%5D.ttf"),
+    ("NotoSerifJP.ttf", "notoserifjp/NotoSerifJP%5Bwght%5D.ttf"),
     (
-        &["noto sans cjk jp", "noto sans jp"],
-        "NotoSansJP.ttf",
-        "notosansjp/NotoSansJP%5Bwght%5D.ttf",
-    ),
-    (
-        &["noto serif cjk jp", "noto serif jp"],
-        "NotoSerifJP.ttf",
-        "notoserifjp/NotoSerifJP%5Bwght%5D.ttf",
-    ),
-    (
-        &["noto sans mono", "roboto mono", "droid sans mono"],
         "NotoSansMono.ttf",
         "notosansmono/NotoSansMono%5Bwdth%2Cwght%5D.ttf",
     ),
+    ("NotoSerif.ttf", "notoserif/NotoSerif%5Bwdth%2Cwght%5D.ttf"),
+    ("NotoSans.ttf", "notosans/NotoSans%5Bwdth%2Cwght%5D.ttf"),
     (
-        &["noto serif"],
-        "NotoSerif.ttf",
-        "notoserif/NotoSerif%5Bwdth%2Cwght%5D.ttf",
-    ),
-    (
-        &["noto sans", "roboto", "droid sans"],
-        "NotoSans.ttf",
-        "notosans/NotoSans%5Bwdth%2Cwght%5D.ttf",
-    ),
-    (
-        &["noto color emoji"],
         "NotoColorEmoji.ttf",
         "notocoloremoji/NotoColorEmoji-Regular.ttf",
     ),
@@ -61,37 +46,26 @@ pub(crate) fn default_cache_dir() -> Option<PathBuf> {
     Some(dirs::cache_dir()?.join("boox-notes-renderer/fonts"))
 }
 
-/// Ensure the curated Noto fonts are cached in `dir` (downloading any missing),
-/// and return `(requested-name pattern → cached file)` mappings for resolution.
-pub(crate) fn ensure(dir: &Path) -> Vec<(String, PathBuf)> {
+/// Ensure the curated Noto fonts are cached in `dir`, downloading any
+/// missing. The caller indexes `dir` afterwards, so no mapping is returned.
+pub(crate) fn ensure(dir: &Path) {
     let _ = std::fs::create_dir_all(dir);
-    let mut out = Vec::new();
-    for (patterns, filename, url_path) in DOWNLOADS {
+    for (filename, url_path) in DOWNLOADS {
         let path = dir.join(filename);
-        if !path.exists() {
-            let url = format!("{BASE}/{url_path}");
-            match fetch(&url) {
-                Ok(bytes) if bytes.len() > 1024 => {
-                    if std::fs::write(&path, &bytes).is_err() {
-                        continue;
-                    }
+        if path.exists() {
+            continue;
+        }
+        let url = format!("{BASE}/{url_path}");
+        match fetch(&url) {
+            Ok(bytes) if bytes.len() > 1024 => {
+                if std::fs::write(&path, &bytes).is_ok() {
                     log::info!("downloaded {filename} ({} bytes)", bytes.len());
                 }
-                Ok(_) => {
-                    log::warn!("{filename} download too small; skipped");
-                    continue;
-                }
-                Err(e) => {
-                    log::warn!("could not download {filename}: {e}");
-                    continue;
-                }
             }
-        }
-        for pat in *patterns {
-            out.push((pat.to_string(), path.clone()));
+            Ok(_) => log::warn!("{filename} download too small; skipped"),
+            Err(e) => log::warn!("could not download {filename}: {e}"),
         }
     }
-    out
 }
 
 fn fetch(url: &str) -> Result<Vec<u8>, String> {

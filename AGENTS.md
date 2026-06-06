@@ -5,8 +5,13 @@ Guidance for AI agents and developers working on `boox-notes-renderer`.
 ## What this is
 
 A Rust lib + CLI that converts BOOX (ONYX) `.note` files to vector PDF (plus
-SVG/PNG). Regular notes and infinite notes are both supported. The crate is at
-the repository root.
+SVG/PNG). Regular notes and infinite notes are both supported. The repository
+is a flat cargo workspace:
+
+- `crates/boox-notes-renderer` — the main lib + CLI (everything below).
+- `crates/system-fonts` — a standalone, reusable crate that asks the OS font
+  APIs for fonts (family name lookup + per-character system font fallback);
+  see the Fonts section. No BOOX-specific code.
 
 **In scope:** the modern `geo_layout` container format — handwriting strokes
 (pressure-sensitive), highlighter, typed text boxes, embedded images, and
@@ -18,13 +23,15 @@ rendering.
 
 ## Commands
 
+All commands run from the repository root (the workspace).
+
 ```sh
-cargo build                  # debug build
-cargo test                   # unit tests + integration tests (tests/convert.rs)
+cargo build                  # debug build (all crates)
+cargo test                   # all crates' unit tests + integration tests
 cargo clippy --all-targets   # lint
 cargo fmt                    # format
 
-cargo run -- <in.note> [out.{pdf,svg,png}]
+cargo run -- <in.note> [out.{pdf,svg,png}]    # the only bin, so no -p needed
   [--format pdf|svg|png]
   [--page N] [--scale F] [--single-canvas]
   [--flat-marker]
@@ -34,8 +41,10 @@ cargo run -- <in.note> [out.{pdf,svg,png}]
 
 The arguments and options are documented in [`README.md`](README.md).
 
-Integration tests in `tests/convert.rs` run against the committed fixture notes
-in `tests/examples/` (checked in, so the suite always runs).
+Integration tests run against the committed fixture notes in
+`crates/boox-notes-renderer/tests/examples/` (checked in, so the suite always
+runs). `crates/system-fonts` carries its own host-font tests (macOS-gated
+ones run here; Windows/Linux-gated ones need those hosts).
 
 ## Verifying output (important)
 
@@ -49,9 +58,9 @@ qlmanage -t -s 1400 -o out out/<name>.pdf   # writes out/<name>.pdf.png
 Then open/inspect the PNG. `pdfinfo`/`pdftoppm` (poppler) are not installed here;
 `qlmanage` (Quick Look) and `sips` are. `qlmanage` also renders `.svg` (via
 WebKit) and `.png` directly, so the same command verifies every format.
-Committed fixture notes live in `tests/examples/` (`Infinite Note.note` —
-multi-page/multi-tile; `Note.note` — every item kind), each paired with
-**BOOX's own export** (`*.pdf`) for visual comparison.
+Committed fixture notes live in `crates/boox-notes-renderer/tests/examples/`
+(`Infinite Note.note` — multi-page/multi-tile; `Note.note` — every item kind),
+each paired with **BOOX's own export** (`*.pdf`) for visual comparison.
 
 ## Architecture & data flow
 
@@ -250,40 +259,70 @@ rectangle. (Not exercised by the bundled examples.)
 ## Fonts
 
 `render/fonts.rs` maps the font a note asks for (a family name from the
-rich-text `<font face>`, plus the BOOX device font path as a hint) to an actual
-font file on the host.
+rich-text `<font face>`, plus the BOOX device font path's file stem as an
+extra name hint — the path itself is never used) to an actual font file on
+the host. Resolution has **two axes**: name candidates (outer), and for each
+candidate every *place* a font can come from (inner, `FontDb::find_one`).
 
-**Index.** `FontDb::build` scans the system font dirs plus any `--fonts-dir`
-dirs (non-recursive), reading each file's name table via mmap (so huge `.ttc`s
-aren't fully read). Per family it keeps the face closest to upright Regular
-(weight distance from 400, italic/oblique penalized), so a family spanning
-weights (Hiragino W0–W9) resolves to Regular. `.ttc` face indices are kept
-(`ResolvedFont = (path, index)`).
+**Places** (`find_one`, exact family name, first hit wins):
 
-**Resolution order** (`FontDb::resolve`, first hit wins):
+1. The local index: the `--fonts-dir` dirs, then (with `--download-fonts`)
+   the download cache dir — scanned **non-recursively**, reading each file's
+   name table via mmap (so huge `.ttc`s aren't fully read). Per family the
+   index keeps the face closest to upright Regular (weight distance from 400,
+   italic/oblique penalized), so a family spanning weights resolves to
+   Regular. `.ttc` face indices are kept (`ResolvedFont = (path, index)`).
+2. With `--download-fonts`: a Google Fonts download (exact catalog family,
+   trailing style words like "Bold" stripped progressively; the catalog check
+   is a local map, so misses cost nothing).
+3. With the `system-fonts` cargo feature (in the default set): the OS font
+   APIs (`render/system_fonts.rs`) — **the only source of system fonts**; no
+   fixed system path is ever scanned.
+
+**Name candidates** (`FontDb::resolve`, each goes through `find_one`):
 
 1. `--font <path>` — forces one font for everything (emoji excepted).
-2. The device font-path hint, if it exists as a file on this host.
-3. A `--map-font` override (requested family contains the mapped name).
-4. With `--download-fonts`: the dynamic Google Fonts catalog, exact requested
-   family (trailing style words like "Bold" stripped progressively).
-5. With `--download-fonts`: the curated downloads, matched by name pattern —
-   the Noto fonts behind BOOX's family names that don't match Google's catalog
-   naming ("Noto Sans CJK JP" is "Noto Sans JP" on Google Fonts).
-6. Exact match on the requested family in the host index (exact first, so
-   "Noto Sans" can't loosely grab "Noto Sans Syloti Nagri").
-7. The built-in map of the AOSP/Noto families BOOX ships → host substitutes
-   (`Noto Sans CJK JP`→Hiragino, `Noto Serif`→Times, `Roboto`→Helvetica/Arial, …).
-8. A loose substring match.
-9. The CJK-capable fallback (Hiragino Sans / PingFang SC / Arial Unicode MS /
-   …, first found).
+2. A `--map-font` target (an override: applied before the requested name
+   itself, so the mapping wins even when the requested family exists).
+3. The requested family itself (and the device-path stem).
+4. The built-in substitutes (`DEFAULT_MAP`) for the AOSP/Noto families BOOX
+   ships: the canonical name first, then the Google Fonts name of the same
+   design ("Noto Sans CJK JP" is "Noto Sans JP" there — so a cached download
+   beats a system substitute), then system substitutes (Hiragino, Times,
+   Helvetica/Arial, …).
+5. A loose substring match (local index only — the OS can't substring-match).
+6. The CJK-capable fallback (`FALLBACK_FAMILIES`: Hiragino Sans / PingFang SC
+   / Yu Gothic / … through `find_one`, first found).
 
-**Per-character fallback.** After a box resolves to a font, each character the
-font has no glyph for is drawn with the CJK fallback font instead
-(`font_for_char`) — e.g. Japanese in an Arial-substituted "Noto Sans". Line
-layout (`render/text.rs`) measures real glyph advances from the font that will
-actually draw each character, and the subset collection (`used_chars`) mirrors
-the same per-char choice.
+**OS lookup** (`system-fonts`, in the default feature set; disable via
+`default-features = false` for a pure-Rust build where fonts come only from
+`--fonts-dir`/downloads): the `crates/system-fonts` workspace crate, which
+talks to the platform APIs directly — Core Text on macOS/iOS (descriptor
+matching; misses cleanly, unlike `CTFontCreateWithName`), DirectWrite on
+Windows (via `dwrote`), fontconfig on Linux/FreeBSD (via dlopen, so no build
+dep and graceful absence). Families resolve to a file path + `.ttc` face
+index — exactly what the mmap/subset pipeline needs — landing on the Regular
+face even when the OS ships one file per weight (macOS Hiragino). This finds
+fonts living outside any public font dir: PingFang sits in a private
+framework / on-demand asset on modern macOS/iOS.
+
+**Per-character fallback.** After a box resolves to a font, each character
+the font has no glyph for is re-resolved by `font_for_char`: first — with
+`system-fonts` — the **OS's system font fallback asked with the actual
+character** (`system_fonts::fallback_for_char`: Core Text's
+`CTFontCreateForString`, DirectWrite's `MapCharacters`, fontconfig charset
+matching), so the OS returns a font it considers capable of drawing that
+very character; then the single CJK fallback font (`FALLBACK_FAMILIES`, the
+only per-char fallback when the feature is off). For Han the OS follows the
+user's language settings (ja-first → Hiragino, zh-first → PingFang) unless
+the box's requested family carries a language (`lang_hint`: "Noto Sans CJK
+JP" → `ja`, "…SC" → `zh-Hans`, …), which is passed through so a Japanese
+note stays Japanese-shaped on a Chinese-configured host and vice versa. The
+glyph is still verified against the actual cmap (`advance_em`); answers are
+memoized per (char, lang). Line layout (`render/text.rs`) measures real
+glyph advances from the font that will actually draw each character, and the
+subset collection (`used_chars`)
+mirrors the same per-char choice.
 
 **Embedding.** PDF embeds a glyph subset per font (subsetting is ours, via
 `allsorts` — printpdf 0.9's own subsetting is disabled upstream); SVG embeds a
@@ -292,10 +331,12 @@ Mac-Roman-only); PNG rasterizes glyph outlines with `ttf-parser`.
 
 **Downloads** (`render/download.rs`, `--download-fonts`): fonts land in the
 platform cache dir under `boox-notes-renderer/fonts`, or the directory given
-by `--fonts-cache-dir` / `FontOptions::with_cache_dir`. Two mechanisms: the
-curated Noto list (fetched eagerly, includes Noto Color Emoji) and the full
-Google Fonts catalog (family list cached on disk; per-family files downloaded
-on demand, static Regular preferred, variable fonts at their default instance).
+by `--fonts-cache-dir` / `FontOptions::with_cache_dir`; the cache dir is then
+indexed like a `--fonts-dir` (after the user dirs), so cached fonts resolve
+by their real family names. Two mechanisms: the curated Noto list (fetched
+eagerly, includes Noto Color Emoji) and the full Google Fonts catalog (family
+list cached on disk; per-family files downloaded on demand, static Regular
+preferred, variable fonts at their default instance).
 
 **Emoji** (`render/emoji.rs`): single-codepoint emoji are drawn as inline
 images from a color-emoji font's embedded PNG bitmaps (so they render in color

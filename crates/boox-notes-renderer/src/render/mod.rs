@@ -16,6 +16,8 @@ mod png;
 mod shape;
 mod stroke;
 mod svg;
+#[cfg(feature = "system-fonts")]
+pub(crate) mod system_fonts;
 mod text;
 
 pub use pdf::render_pdf;
@@ -87,25 +89,25 @@ impl FontOptions {
     }
 
     pub(crate) fn build_db(&self) -> fonts::FontDb {
-        let cache = self.cache_dir.clone().or_else(download::default_cache_dir);
-        let (priority, google) = match (self.download, cache) {
-            (true, Some(dir)) => (
-                download::ensure(&dir),
-                Some(download::GoogleFonts::load(dir)),
-            ),
-            (true, None) => {
-                log::warn!("no cache directory available; font download disabled");
-                (Vec::new(), None)
+        // The local index covers the user dirs and — with downloads on — the
+        // cache dir after them, so a `--fonts-dir` font shadows a cached one.
+        let mut dirs = self.dirs.clone();
+        let google = if self.download {
+            match self.cache_dir.clone().or_else(download::default_cache_dir) {
+                Some(dir) => {
+                    download::ensure(&dir);
+                    dirs.push(dir.clone());
+                    Some(download::GoogleFonts::load(dir))
+                }
+                None => {
+                    log::warn!("no cache directory available; font download disabled");
+                    None
+                }
             }
-            (false, _) => (Vec::new(), None),
+        } else {
+            None
         };
-        fonts::FontDb::build(
-            &self.dirs,
-            self.map.clone(),
-            self.explicit.clone(),
-            priority,
-            google,
-        )
+        fonts::FontDb::build(&dirs, self.map.clone(), self.explicit.clone(), google)
     }
 }
 

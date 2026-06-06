@@ -37,10 +37,11 @@ pub(crate) fn draw(b: &mut impl Backend, canvas: &Canvas, t: &RenderText, fonts:
     // measure the real advance — the 0.5/1.0 em heuristic drifts from what
     // the backend actually draws, which misplaces every run after a style
     // change.
+    let lang = super::fonts::lang_hint(t.font_name.as_deref());
     let mut chars: Vec<SChar> = Vec::new();
     for run in &t.runs {
         for c in run.text.chars() {
-            let draw = super::fonts::char_draw(fonts, &font, c);
+            let draw = super::fonts::char_draw(fonts, &font, c, lang);
             let w = match &draw {
                 CharDraw::Skip => 0.0,
                 CharDraw::Emoji => size, // an inline image, one em square

@@ -106,7 +106,10 @@ fn svg_renders_one_file_per_page_with_embedded_font() {
     let (_, svg) = &pages[0];
     assert!(svg.starts_with("<svg"));
     assert!(svg.ends_with("</svg>"));
-    // The note has text, so a subset font should be embedded.
+    // The note has text, so a subset font should be embedded. Without
+    // `system-fonts` no font source exists in this test environment (no
+    // --fonts-dir, no downloads), so text is skipped — nothing to embed.
+    #[cfg(feature = "system-fonts")]
     assert!(svg.contains("@font-face"), "subset font embedded");
 }
 
