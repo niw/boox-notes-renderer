@@ -41,12 +41,15 @@ pub(crate) const WHITE: Rgba = Rgba {
 pub struct FontOptions {
     /// `--font`: force this font file for all text.
     pub explicit: Option<std::path::PathBuf>,
-    /// `--fonts-path`: extra directories to search for fonts.
+    /// `--fonts-dir`: extra directories to search for fonts.
     pub dirs: Vec<std::path::PathBuf>,
     /// `--map-font`: `(requested family, target family)` overrides.
     pub map: Vec<(String, String)>,
     /// `--download-fonts`: fetch Noto fonts for the families the note uses.
     pub download: bool,
+    /// `--fonts-cache-dir`: where downloaded fonts are stored. `None` uses the
+    /// platform cache dir (`<cache>/boox-notes-renderer/fonts`).
+    pub cache_dir: Option<std::path::PathBuf>,
 }
 
 impl FontOptions {
@@ -57,7 +60,7 @@ impl FontOptions {
         self
     }
 
-    /// Extra directories to search for fonts (`--fonts-path`).
+    /// Extra directories to search for fonts (`--fonts-dir`).
     pub fn with_dirs(mut self, dirs: Vec<std::path::PathBuf>) -> Self {
         self.dirs = dirs;
         self
@@ -75,11 +78,26 @@ impl FontOptions {
         self.download = download;
         self
     }
+
+    /// Store downloaded fonts in this directory instead of the platform cache
+    /// dir (`--fonts-cache-dir`). Only meaningful together with `with_download`.
+    pub fn with_cache_dir(mut self, dir: Option<std::path::PathBuf>) -> Self {
+        self.cache_dir = dir;
+        self
+    }
+
     pub(crate) fn build_db(&self) -> fonts::FontDb {
-        let (priority, google) = if self.download {
-            (download::ensure(), Some(download::GoogleFonts::load()))
-        } else {
-            (Vec::new(), None)
+        let cache = self.cache_dir.clone().or_else(download::default_cache_dir);
+        let (priority, google) = match (self.download, cache) {
+            (true, Some(dir)) => (
+                download::ensure(&dir),
+                Some(download::GoogleFonts::load(dir)),
+            ),
+            (true, None) => {
+                log::warn!("no cache directory available; font download disabled");
+                (Vec::new(), None)
+            }
+            (false, _) => (Vec::new(), None),
         };
         fonts::FontDb::build(
             &self.dirs,

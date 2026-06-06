@@ -25,8 +25,8 @@ boox-notes-renderer <input.note> [output]
   [--format pdf|svg|png]
   [--page N] [--scale F] [--single-canvas]
   [--flat-marker]
-  [--font <path>] [--fonts-path <dir>]... [--map-font "Name=Target"]...
-  [--download-fonts]
+  [--font <path>] [--fonts-dir <dir>]... [--map-font "Name=Target"]...
+  [--download-fonts] [--fonts-cache-dir <dir>]
 ```
 
 ### Arguments
@@ -66,7 +66,7 @@ boox-notes-renderer <input.note> [output]
 - `--font <path>`
   Force this font file (TTF/OTF/TTC) for all text, bypassing name resolution.
 
-- `--fonts-path <dir>`
+- `--fonts-dir <dir>`
   Add a directory to search for fonts. Repeatable.
 
 - `--map-font "Name=Target"`
@@ -76,6 +76,11 @@ boox-notes-renderer <input.note> [output]
 - `--download-fonts`
   Download the note's fonts from Google Fonts (OFL/Apache) into a cache and
   use them, so text renders in the note's actual fonts.
+
+- `--fonts-cache-dir <dir>`
+  Where `--download-fonts` stores the downloaded fonts. Defaults to the
+  platform cache dir (macOS `~/Library/Caches/boox-notes-renderer/fonts`,
+  Linux `$XDG_CACHE_HOME` or `~/.cache`, Windows `%LOCALAPPDATA%`).
 
 ### Font resolution
 

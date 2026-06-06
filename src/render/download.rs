@@ -15,7 +15,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Read as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const BASE: &str = "https://raw.githubusercontent.com/google/fonts/main/ofl";
 
@@ -53,20 +53,18 @@ const DOWNLOADS: &[(&[&str], &str, &str)] = &[
     ),
 ];
 
-/// `<cache>/boox-notes-renderer/fonts`, where downloaded fonts live. The base is
-/// the platform cache dir (macOS `~/Library/Caches`, Linux `$XDG_CACHE_HOME` or
+/// The default download location, `<cache>/boox-notes-renderer/fonts`, used
+/// when [`crate::render::FontOptions`] doesn't override it. The base is the
+/// platform cache dir (macOS `~/Library/Caches`, Linux `$XDG_CACHE_HOME` or
 /// `~/.cache`, Windows `%LOCALAPPDATA%`).
-pub(crate) fn cache_dir() -> Option<PathBuf> {
+pub(crate) fn default_cache_dir() -> Option<PathBuf> {
     Some(dirs::cache_dir()?.join("boox-notes-renderer/fonts"))
 }
 
-/// Ensure the curated Noto fonts are cached (downloading any missing), and return
-/// `(requested-name pattern → cached file)` mappings for resolution.
-pub(crate) fn ensure() -> Vec<(String, PathBuf)> {
-    let Some(dir) = cache_dir() else {
-        return Vec::new();
-    };
-    let _ = std::fs::create_dir_all(&dir);
+/// Ensure the curated Noto fonts are cached in `dir` (downloading any missing),
+/// and return `(requested-name pattern → cached file)` mappings for resolution.
+pub(crate) fn ensure(dir: &Path) -> Vec<(String, PathBuf)> {
+    let _ = std::fs::create_dir_all(dir);
     let mut out = Vec::new();
     for (patterns, filename, url_path) in DOWNLOADS {
         let path = dir.join(filename);
@@ -137,6 +135,8 @@ const STYLE_WORDS: &[&str] = &[
 /// Dynamic Google Fonts lookup: the full catalog of family names (fetched once,
 /// cached on disk), with per-family font files downloaded on demand.
 pub(crate) struct GoogleFonts {
+    /// Where the catalog and downloaded files are cached.
+    dir: PathBuf,
     /// Normalized family name → canonical name ("coming soon" → "Coming Soon").
     families: HashMap<String, String>,
     /// Per-run memo: normalized request → cached file (`None` = known miss).
@@ -144,12 +144,13 @@ pub(crate) struct GoogleFonts {
 }
 
 impl GoogleFonts {
-    /// Load the catalog (from the disk cache, fetching it on first use). An
-    /// empty catalog (offline, no cache) makes every lookup miss gracefully.
-    pub(crate) fn load() -> Self {
+    /// Load the catalog (from the disk cache in `dir`, fetching it on first
+    /// use). An empty catalog (offline) makes every lookup miss gracefully.
+    pub(crate) fn load(dir: PathBuf) -> Self {
         Self {
-            families: catalog().unwrap_or_default(),
+            families: catalog(&dir).unwrap_or_default(),
             memo: RefCell::new(HashMap::new()),
+            dir,
         }
     }
 
@@ -162,7 +163,7 @@ impl GoogleFonts {
         }
         let result = candidates(name)
             .into_iter()
-            .find_map(|c| fetch_family(self.families.get(&c)?));
+            .find_map(|c| fetch_family(&self.dir, self.families.get(&c)?));
         self.memo
             .borrow_mut()
             .insert(name.to_string(), result.clone());
@@ -188,8 +189,7 @@ fn candidates(name: &str) -> Vec<String> {
 
 /// The normalized → canonical family-name catalog, cached as a slim JSON map in
 /// the font cache dir (delete it to pick up newly published families).
-fn catalog() -> Option<HashMap<String, String>> {
-    let dir = cache_dir()?;
+fn catalog(dir: &Path) -> Option<HashMap<String, String>> {
     let path = dir.join("gf-catalog.json");
     if let Ok(bytes) = std::fs::read(&path)
         && let Ok(map) = serde_json::from_slice(&bytes)
@@ -211,7 +211,7 @@ fn catalog() -> Option<HashMap<String, String>> {
         .filter_map(|f| f.get("family")?.as_str().map(String::from))
         .map(|fam| (super::fonts::norm(&fam), fam))
         .collect();
-    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::create_dir_all(dir);
     if let Ok(json) = serde_json::to_vec(&map) {
         let _ = std::fs::write(&path, json);
     }
@@ -225,8 +225,7 @@ fn catalog() -> Option<HashMap<String, String>> {
 /// Download (or reuse from the cache) the best font file of a canonical
 /// family: its `download/list` manifest names every file; prefer the static
 /// Regular, else the first TTF/OTF (a variable font's default instance).
-fn fetch_family(family: &str) -> Option<PathBuf> {
-    let dir = cache_dir()?;
+fn fetch_family(dir: &Path, family: &str) -> Option<PathBuf> {
     let slug: String = family
         .to_lowercase()
         .chars()
@@ -278,7 +277,7 @@ fn fetch_family(family: &str) -> Option<PathBuf> {
         "ttf"
     };
     let path = dir.join(format!("gf-{slug}.{ext}"));
-    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::create_dir_all(dir);
     std::fs::write(&path, &bytes).ok()?;
     log::info!("downloaded {family} ({} bytes)", bytes.len());
     Some(path)

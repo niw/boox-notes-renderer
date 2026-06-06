@@ -25,8 +25,8 @@ struct Args {
     #[arg(long)]
     font: Option<PathBuf>,
     /// Extra directory to search for fonts (repeatable).
-    #[arg(long = "fonts-path")]
-    fonts_path: Vec<PathBuf>,
+    #[arg(long = "fonts-dir")]
+    fonts_dir: Vec<PathBuf>,
     /// Map a requested font family to a host family, e.g.
     /// `--map-font "Noto Sans CJK JP=Hiragino Sans"` (repeatable).
     #[arg(long = "map-font")]
@@ -36,6 +36,10 @@ struct Args {
     /// works; the BOOX Noto CJK names and color emoji are always fetched.
     #[arg(long = "download-fonts")]
     download_fonts: bool,
+    /// Directory for downloaded fonts (with --download-fonts). Defaults to the
+    /// platform cache dir (`<cache>/boox-notes-renderer/fonts`).
+    #[arg(long = "fonts-cache-dir")]
+    fonts_cache_dir: Option<PathBuf>,
     /// Composite all pages onto one giant canvas (infinite-canvas mode) instead
     /// of the default one-page-per-note-page output.
     #[arg(long)]
@@ -157,9 +161,10 @@ fn main() -> Result<()> {
         .collect();
     let font_opts = FontOptions::default()
         .with_explicit(args.font)
-        .with_dirs(args.fonts_path)
+        .with_dirs(args.fonts_dir)
         .with_map(map)
-        .with_download(args.download_fonts);
+        .with_download(args.download_fonts)
+        .with_cache_dir(args.fonts_cache_dir);
 
     let files: Vec<(String, Vec<u8>)> = match format {
         // PDF is one (multi-page) file; --page selects a single page inside it.

@@ -28,8 +28,8 @@ cargo run -- <in.note> [out.{pdf,svg,png}]
   [--format pdf|svg|png]
   [--page N] [--scale F] [--single-canvas]
   [--flat-marker]
-  [--font <path>] [--fonts-path <dir>]... [--map-font "Name=Target"]...
-  [--download-fonts]
+  [--font <path>] [--fonts-dir <dir>]... [--map-font "Name=Target"]...
+  [--download-fonts] [--fonts-cache-dir <dir>]
 ```
 
 The arguments and options are documented in [`README.md`](README.md).
@@ -253,7 +253,7 @@ rectangle. (Not exercised by the bundled examples.)
 rich-text `<font face>`, plus the BOOX device font path as a hint) to an actual
 font file on the host.
 
-**Index.** `FontDb::build` scans the system font dirs plus any `--fonts-path`
+**Index.** `FontDb::build` scans the system font dirs plus any `--fonts-dir`
 dirs (non-recursive), reading each file's name table via mmap (so huge `.ttc`s
 aren't fully read). Per family it keeps the face closest to upright Regular
 (weight distance from 400, italic/oblique penalized), so a family spanning
@@ -291,7 +291,8 @@ subset `@font-face` as a base64 data URI (with a Unicode cmap — browsers rejec
 Mac-Roman-only); PNG rasterizes glyph outlines with `ttf-parser`.
 
 **Downloads** (`render/download.rs`, `--download-fonts`): fonts land in the
-platform cache dir under `boox-notes-renderer/fonts`. Two mechanisms: the
+platform cache dir under `boox-notes-renderer/fonts`, or the directory given
+by `--fonts-cache-dir` / `FontOptions::with_cache_dir`. Two mechanisms: the
 curated Noto list (fetched eagerly, includes Noto Color Emoji) and the full
 Google Fonts catalog (family list cached on disk; per-family files downloaded
 on demand, static Regular preferred, variable fonts at their default instance).

@@ -5,7 +5,7 @@
 //! explicit user mapping (`--map-font`) → `--download-fonts` Google catalog →
 //! curated downloads → exact requested family → built-in BOOX/AOSP family map →
 //! deterministic loose match → CJK/system fallback. Fonts are discovered by
-//! scanning the system font dirs plus any `--fonts-path` dirs, reading each
+//! scanning the system font dirs plus any `--fonts-dir` dirs, reading each
 //! file's name table (via mmap, so huge `.ttc`s aren't fully read).
 
 use std::cell::RefCell;
@@ -111,7 +111,7 @@ const FALLBACK_FAMILIES: &[&str] = &[
 ];
 
 /// Color-emoji families tried, in order, for `emoji_font` (the host index, so a
-/// `--fonts-path` copy works too). No note ever names these — the BOOX device
+/// `--fonts-dir` copy works too). No note ever names these — the BOOX device
 /// falls back to its system emoji font at draw time, and we mirror that.
 const EMOJI_FAMILIES: &[&str] = &["apple color emoji", "noto color emoji"];
 
