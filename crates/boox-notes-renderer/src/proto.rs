@@ -151,7 +151,8 @@ pub struct Shape {
     pub point_list: Vec<u8>,
 }
 
-/// Decode a length-delimited protobuf message from a byte slice.
+/// Decode a protobuf message from a byte slice that is exactly one message
+/// (the whole buffer — not length-delimited framing).
 pub fn decode<M: Message + Default>(bytes: &[u8]) -> Result<M, prost::DecodeError> {
     M::decode(bytes)
 }

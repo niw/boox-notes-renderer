@@ -166,9 +166,11 @@ impl JavaRandom {
 /// repeating (9 windows per pressure).
 fn grain_jitter(rng: &mut JavaRandom, pressure: f32) -> (usize, usize) {
     let cp = ((pressure * 1000.0).floor() / 1000.0).clamp(0.0, 1.0);
+    // cp >= 0 and the random factor is >= 11, so v is always non-negative and
+    // plain `%` matches the documented formula.
     let v = (cp * (rng.next_int(9) as f32 + 11.0) * 100000.0) as i64;
-    let jx = ((v % 1000).rem_euclid(100)) as usize;
-    let jy = (((v / 1000) % 1000).rem_euclid(100)) as usize;
+    let jx = ((v % 1000) % 100) as usize;
+    let jy = (((v / 1000) % 1000) % 100) as usize;
     (jx, jy)
 }
 

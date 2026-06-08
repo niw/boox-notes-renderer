@@ -34,6 +34,12 @@ pub(crate) const WHITE: Rgba = Rgba {
     a: 1.0,
 };
 
+/// Faux-bold outline thickness as a fraction of the font size, shared by the
+/// stroke-based backends (PDF in pt, PNG in px × scale) so a bold run reads at
+/// the same weight in both. SVG uses the browser's real `font-weight:bold`
+/// instead, so it doesn't use this.
+pub(crate) const FAUX_BOLD_RATIO: f32 = 0.03;
+
 /// Font selection options shared by every backend.
 ///
 /// Non-exhaustive (options grow): build one with [`Default`] and the chainable

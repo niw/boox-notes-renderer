@@ -52,20 +52,47 @@ pub(crate) fn ensure(dir: &Path) {
     let _ = std::fs::create_dir_all(dir);
     for (filename, url_path) in DOWNLOADS {
         let path = dir.join(filename);
-        if path.exists() {
+        if cached_font(&path).is_some() {
             continue;
         }
         let url = format!("{BASE}/{url_path}");
         match fetch(&url) {
-            Ok(bytes) if bytes.len() > 1024 => {
+            Ok(bytes) if bytes.len() > 1024 && looks_like_font(&bytes) => {
                 if std::fs::write(&path, &bytes).is_ok() {
                     log::info!("downloaded {filename} ({} bytes)", bytes.len());
                 }
             }
-            Ok(_) => log::warn!("{filename} download too small; skipped"),
+            Ok(_) => log::warn!("{filename} download was not a usable font; skipped"),
             Err(e) => log::warn!("could not download {filename}: {e}"),
         }
     }
+}
+
+/// True if `bytes` begins with an **sfnt** signature this crate's font pipeline
+/// can actually parse (`ttf-parser` / `allsorts`). Used to reject an HTML error
+/// page (a captive portal or rate-limit response) before it is cached as a
+/// `.ttf` — otherwise it would fail every later parse forever. WOFF/WOFF2 are
+/// deliberately *not* accepted: the rest of the pipeline can't read them, so a
+/// cached WOFF would fail just as permanently as the HTML it's meant to catch
+/// (and Google Fonts only serves `.ttf`/`.otf` here anyway).
+fn looks_like_font(bytes: &[u8]) -> bool {
+    bytes.len() >= 4 && {
+        let s = &bytes[..4];
+        s == b"\x00\x01\x00\x00" // TrueType outlines
+            || s == b"OTTO"      // OpenType CFF
+            || s == b"true"      // TrueType (Apple)
+            || s == b"ttcf" // TrueType Collection
+    }
+}
+
+/// Return `path` only if it exists and still starts with a font signature, so a
+/// previously cached non-font response is treated as missing and re-fetched
+/// rather than failing forever.
+fn cached_font(path: &Path) -> Option<PathBuf> {
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut head = [0u8; 4];
+    f.read_exact(&mut head).ok()?;
+    looks_like_font(&head).then(|| path.to_path_buf())
 }
 
 fn fetch(url: &str) -> Result<Vec<u8>, String> {
@@ -208,8 +235,8 @@ fn fetch_family(dir: &Path, family: &str) -> Option<PathBuf> {
         .collect();
     for ext in ["ttf", "otf"] {
         let path = dir.join(format!("gf-{slug}.{ext}"));
-        if path.exists() {
-            return Some(path);
+        if let Some(p) = cached_font(&path) {
+            return Some(p);
         }
     }
     let url = format!("{DOWNLOAD_LIST_URL}{}", family.replace(' ', "%20"));
@@ -235,9 +262,9 @@ fn fetch_family(dir: &Path, family: &str) -> Option<PathBuf> {
         .collect();
     let (filename, file_url) = pick_font_ref(&refs)?;
     let bytes = match fetch(file_url) {
-        Ok(b) if b.len() > 1024 => b,
+        Ok(b) if b.len() > 1024 && looks_like_font(&b) => b,
         Ok(_) => {
-            log::warn!("{family} download too small; skipped");
+            log::warn!("{family} download was not a usable font; skipped");
             return None;
         }
         Err(e) => {
@@ -324,6 +351,19 @@ mod tests {
         assert_eq!(pick_font_ref(&refs).unwrap().1, "u1");
         let none = vec![("LICENSE.txt".to_string(), "u0".to_string())];
         assert!(pick_font_ref(&none).is_none());
+    }
+
+    #[test]
+    fn looks_like_font_accepts_signatures_rejects_html() {
+        assert!(looks_like_font(b"\x00\x01\x00\x00rest"));
+        assert!(looks_like_font(b"OTTO...."));
+        assert!(looks_like_font(b"ttcf...."));
+        // WOFF/WOFF2 are not sfnt the pipeline can parse, so they're rejected.
+        assert!(!looks_like_font(b"wOF2...."));
+        assert!(!looks_like_font(b"wOFF...."));
+        assert!(!looks_like_font(b"<!DOCTYPE html>"));
+        assert!(!looks_like_font(b"{\"error\""));
+        assert!(!looks_like_font(b"ab"));
     }
 
     #[test]

@@ -54,6 +54,24 @@ pub enum Error {
         /// How many pages the document has.
         pages: usize,
     },
+    /// A page's pixel dimensions exceed what the PNG rasterizer can allocate.
+    #[error("page {page} too large to rasterize ({width}x{height} px)")]
+    RasterTooLarge {
+        /// The 1-based page index that could not be rasterized.
+        page: usize,
+        /// The requested raster width in pixels.
+        width: u32,
+        /// The requested raster height in pixels.
+        height: u32,
+    },
+    /// Encoding a rendered page to PNG failed.
+    #[error("encoding page {page} to PNG: {detail}")]
+    Encode {
+        /// The 1-based page index that failed to encode.
+        page: usize,
+        /// The underlying encode failure, as text.
+        detail: String,
+    },
 }
 
 /// Crate-wide result alias.

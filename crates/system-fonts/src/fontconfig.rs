@@ -107,33 +107,42 @@ impl Query {
             if matched.is_null() || result != FcResultMatch {
                 return None;
             }
-            let face = (|| {
-                if let Some(expect) = expect_family
-                    && !pattern_has_family(matched, expect)
-                {
-                    return None;
-                }
-                let mut file: *mut FcChar8 = null_mut();
-                if (LIB.FcPatternGetString)(matched, FC_FILE.as_ptr(), 0, &mut file)
-                    != FcResultMatch
-                    || file.is_null()
-                {
-                    return None;
-                }
-                let path = PathBuf::from(CStr::from_ptr(file as *const c_char).to_str().ok()?);
-                let mut index: c_int = 0;
-                if (LIB.FcPatternGetInteger)(matched, FC_INDEX.as_ptr(), 0, &mut index)
-                    != FcResultMatch
-                {
-                    index = 0;
-                }
-                Some(FaceRef {
-                    path,
-                    index: index.max(0) as u32,
-                })
-            })();
-            (LIB.FcPatternDestroy)(matched);
-            face
+            // Owns `matched`; freed on every early return below.
+            let matched = OwnedPattern(matched);
+            let m = matched.0;
+
+            if let Some(expect) = expect_family
+                && !pattern_has_family(m, expect)
+            {
+                return None;
+            }
+            let mut file: *mut FcChar8 = null_mut();
+            if (LIB.FcPatternGetString)(m, FC_FILE.as_ptr(), 0, &mut file) != FcResultMatch
+                || file.is_null()
+            {
+                return None;
+            }
+            let path = PathBuf::from(CStr::from_ptr(file as *const c_char).to_str().ok()?);
+            let mut index: c_int = 0;
+            if (LIB.FcPatternGetInteger)(m, FC_INDEX.as_ptr(), 0, &mut index) != FcResultMatch {
+                index = 0;
+            }
+            Some(FaceRef {
+                path,
+                index: index.max(0) as u32,
+            })
+        }
+    }
+}
+
+/// Owns an `FcPattern`, freeing it on drop — used for the result of
+/// `FcFontMatch`, which the caller must destroy.
+struct OwnedPattern(*mut FcPattern);
+
+impl Drop for OwnedPattern {
+    fn drop(&mut self) {
+        unsafe {
+            (LIB.FcPatternDestroy)(self.0);
         }
     }
 }

@@ -9,11 +9,10 @@ use super::{Backend, GroupBlend, charcoal};
 use crate::model::{Canvas, RenderStroke, Rgba};
 use crate::points;
 
-/// nBrush (pen 21) per-point width — a two-phase width model.
+/// nBrush (pen 21) per-point width — a two-phase width model (dwell + move),
+/// with a pen-down seed and a pen-up adjustment (handled in the caller):
 ///
-/// Three phases:
-///
-/// - **Pen-down**: `velAccum = 0`, `size = D·√p₀` (`D = 2·nominal`).
+/// - **Pen-down** (seed): `velAccum = 0`, `size = D·√p₀` (`D = 2·nominal`).
 /// - **Dwell** — while the pen stays within 3 px of the stroke's first point:
 ///   ```text
 ///   size += D·0.01·dt/16          clamp [minWidth, D+3]   (grows ~0/point)
@@ -94,9 +93,9 @@ fn neo_brush_widths(nominal: f32, pts: &[points::Point]) -> Vec<f32> {
     // Move phase: the velocity integrator, continuing from the dwell's vel_accum.
     #[allow(clippy::needless_range_loop)]
     for j in i..n {
-        // The integrator needs the previous (j-1→j) and next (j→j+1) segment
-        // distances, so it only steps on interior points.
-        if j >= 1 && j + 1 < n {
+        // The integrator needs the next (j→j+1) segment distance, so it skips
+        // the last point (the dwell loop already guarantees j >= 1).
+        if j + 1 < n {
             let d_prev = seg_dist(j);
             if d_prev > 0.0 {
                 let d_next = seg_dist(j + 1);
@@ -127,7 +126,7 @@ fn neo_brush_widths(nominal: f32, pts: &[points::Point]) -> Vec<f32> {
         let accelerating = d_prev > 0.0 && (d_last / d_prev) > T_ACCEL;
         if !accelerating {
             let p = pressure(n - 1);
-            widths[n - 1] = (d * p.powf(E_PRESS)).clamp(MIN_W, cap).clamp(0.5, cap);
+            widths[n - 1] = (d * p.powf(E_PRESS)).clamp(0.5, cap);
         }
     }
     widths

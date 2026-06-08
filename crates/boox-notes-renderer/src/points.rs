@@ -76,9 +76,8 @@ impl PointsFile {
         }
         let mut cur = Cursor::new(bytes);
 
-        // Header.
-        let _version = cur.read_u32::<BE>()?;
-        cur.seek(SeekFrom::Start(HEADER_LEN))?; // skip page_id + points_id
+        // Skip the header (version + page_id + points_id); none is needed.
+        cur.seek(SeekFrom::Start(HEADER_LEN))?;
 
         // Stroke table location.
         cur.seek(SeekFrom::End(-4))?;

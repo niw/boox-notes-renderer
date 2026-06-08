@@ -13,7 +13,7 @@
 //! deterministic loose index match → the CJK fallback.
 
 use std::cell::RefCell;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -430,8 +430,10 @@ pub(crate) fn lang_hint(font_name: Option<&str>) -> Option<&'static str> {
 pub(crate) fn used_chars<'a>(
     db: &FontDb,
     canvases: impl IntoIterator<Item = &'a crate::model::Canvas>,
-) -> HashMap<ResolvedFont, BTreeSet<char>> {
-    let mut used: HashMap<ResolvedFont, BTreeSet<char>> = HashMap::new();
+) -> BTreeMap<ResolvedFont, BTreeSet<char>> {
+    // BTreeMap (not HashMap): the SVG backend names subset families by iteration
+    // order, so a deterministic order keeps the emitted SVG byte-stable.
+    let mut used: BTreeMap<ResolvedFont, BTreeSet<char>> = BTreeMap::new();
     for canvas in canvases {
         for item in &canvas.items {
             let crate::model::RenderItem::Text(t) = item else {
@@ -547,10 +549,9 @@ fn face_score(face: &ttf_parser::Face) -> i32 {
         }
 }
 
-/// Index every font file in `dir` (non-recursive), keeping the most Regular face
-/// per family.
 /// Index every font file directly in `dir` (non-recursive — these are
-/// user-supplied flat dirs: `--fonts-dir` and the download cache).
+/// user-supplied flat dirs: `--fonts-dir` and the download cache), keeping the
+/// most Regular face per family.
 fn index_dir(dir: &Path, scored: &mut HashMap<String, (ResolvedFont, i32)>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;

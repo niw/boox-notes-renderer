@@ -134,9 +134,11 @@ pub(crate) fn draw(b: &mut impl Backend, canvas: &Canvas, t: &RenderText, fonts:
     }
 }
 
-/// Rough advance width of a character in em units: CJK/full-width glyphs ~1.0,
-/// everything else ~0.5. Last resort when no font covers the char.
-fn char_em(c: char) -> f32 {
+/// Rough advance width of a character in em units: emoji modifiers 0.0,
+/// emoji and CJK/full-width glyphs ~1.0, everything else ~0.5. Last resort
+/// when no font covers the char; the PNG backend reuses it so a tofu char
+/// advances by the same amount layout measured here.
+pub(crate) fn char_em(c: char) -> f32 {
     if emoji::is_emoji_modifier(c) {
         0.0
     } else if emoji::is_emoji(c) || (c as u32) >= 0x2E80 {

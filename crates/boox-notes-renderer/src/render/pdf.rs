@@ -14,7 +14,7 @@ use printpdf::{
 use super::fonts::{self, ResolvedFont};
 use super::{Backend, FontOptions, GroupBlend, PageSel, paint_canvas, selected_pages};
 use crate::model::{Canvas, Document, RenderImage, Rgba};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::hash::{Hash, Hasher};
 
 /// Render the selected note pages to a single (multi-page) PDF. `PageSel::All`
@@ -59,7 +59,7 @@ struct PdfBackend {
     /// Fonts embedded on demand, keyed by resolved (path, face index).
     fonts: HashMap<ResolvedFont, FontId>,
     /// The characters each font draws (whole document), for subset embedding.
-    subsets: HashMap<ResolvedFont, BTreeSet<char>>,
+    subsets: BTreeMap<ResolvedFont, BTreeSet<char>>,
     ops: Vec<Op>,
     // Coalescing caches (reset per page / after state-changing ops).
     cur_outline: Option<Rgba>,
@@ -83,7 +83,7 @@ impl PdfBackend {
     fn new(
         doc_model: &Document,
         selected: &[(String, usize)],
-        subsets: HashMap<ResolvedFont, BTreeSet<char>>,
+        subsets: BTreeMap<ResolvedFont, BTreeSet<char>>,
     ) -> Self {
         let mut doc = PdfDocument::new("boox-notes-renderer");
 
@@ -208,6 +208,10 @@ impl PdfBackend {
         if self.cur_dash.as_ref() != Some(&next) {
             let pat = match &next {
                 Some(d) => {
+                    // printpdf 0.9's LineDashPattern is integer-only, so dash
+                    // lengths round to whole pt (min 1) — the SVG/PNG backends
+                    // keep them as floats, so very small patterns read coarser
+                    // here. Known limitation; revisit if printpdf gains floats.
                     let arr: Vec<i64> = d.iter().map(|x| x.round().max(1.0) as i64).collect();
                     LineDashPattern::from_array(&arr, 0)
                 }
@@ -427,7 +431,7 @@ impl Backend for PdfBackend {
                 col: rgba_to_color(color),
             });
             self.ops.push(Op::SetOutlineThickness {
-                pt: Pt(size * 0.03),
+                pt: Pt(size * super::FAUX_BOLD_RATIO),
             });
         }
         // Faux italic = shear the text matrix; this also sets the position.
@@ -514,13 +518,13 @@ mod tests {
     use crate::model::Document;
 
     fn backend() -> PdfBackend {
-        PdfBackend::new(&Document { canvases: vec![] }, &[], HashMap::new())
+        PdfBackend::new(&Document { canvases: vec![] }, &[], BTreeMap::new())
     }
 
     #[test]
     fn dash_reasserts_solid_after_state_reset() {
         let mut b = backend();
-        b.set_dash(Some(&[4.0, 4.0])); // dashed
+        b.set_dash(Some(&[4.0, 4.0]));
         let after_dashed = b.ops.len();
         // A translucent group's RestoreGraphicsState reverts the PDF dash back to
         // dashed and reset_caches() marks the cache unknown.

@@ -85,28 +85,26 @@ boox-notes-renderer <input.note> [output]
 
 ### Font resolution
 
-Fonts are resolved per text box from the family the note requests. Name
-candidates are tried in order — a `--map-font` override → the requested
-family itself → a built-in map of the AOSP/Noto fonts BOOX ships
-(`Noto Sans CJK JP`→Hiragino, `Noto Serif`→Times, `Roboto`→Helvetica/Arial,
-…) → a CJK fallback — and each candidate is searched in every place a font
-can come from: the `--fonts-dir` dirs, the `--download-fonts` cache (and a
-Google Fonts download on a miss), then the OS font APIs (Core Text on
-macOS/iOS, DirectWrite on Windows, fontconfig on Linux — the only source of
-system fonts; no font directory is scanned beyond the ones you pass). The OS
-lookup finds fonts living outside any public font directory, e.g. PingFang,
-which modern macOS/iOS keep inside a private framework.
+Fonts are resolved per text box. Name candidates are tried in order — a
+`--map-font` override → the requested family → a built-in map of the
+AOSP/Noto fonts BOOX ships (`Noto Sans CJK JP`→Hiragino, `Noto Serif`→Times,
+`Roboto`→Helvetica/Arial, …) → a CJK fallback — and each is searched in every
+place a font can come from: the `--fonts-dir` dirs, the `--download-fonts`
+cache (downloading from Google Fonts on a miss), then the OS font APIs (Core
+Text on macOS/iOS, DirectWrite on Windows, fontconfig on Linux — the only
+source of system fonts; no other directory is scanned). The OS lookup also
+finds fonts outside any public directory, e.g. PingFang, which modern
+macOS/iOS hide in a private framework.
 
-Characters the resolved font has no glyph for fall back per character: to
-the OS's own font fallback, asked with the actual character (the same
-language-settings-aware cascade the platform uses — so kanji follow your
-system language preference, or the language the note's font name implies,
-e.g. `Noto Sans CJK JP` → Japanese shapes), then to a CJK-capable
+A character the resolved font lacks falls back per character: to the OS's own
+fallback asked with that character (the platform's language-aware cascade, so
+kanji follow your system language, or the language the note's font name
+implies — `Noto Sans CJK JP` → Japanese shapes), then to a CJK-capable
 last-resort font.
 
-PDF embeds a glyph subset per font, SVG embeds a subset `@font-face` per
-font, and PNG rasterizes glyph outlines. Color emoji are drawn from the
-platform emoji font (Apple Color Emoji, or a downloaded Noto Color Emoji).
+PDF embeds a glyph subset per font, SVG a subset `@font-face` per font, and
+PNG rasterizes glyph outlines. Color emoji are drawn from the platform emoji
+font (Apple Color Emoji, or a downloaded Noto Color Emoji).
 
 The OS font APIs sit behind the `system-fonts` cargo feature, which is in the
 default set. Building the library with `default-features = false` gives a
@@ -148,7 +146,7 @@ let pdf: Vec<u8> = render::render_pdf(&doc, &FontOptions::default(), PageSel::Al
 `Document::load` accepts any `Read + Seek` (e.g. an in-memory `Cursor`), and
 the render functions return bytes/strings — file I/O stays with the caller.
 `FontOptions` is built with `Default` plus the chainable `with_explicit` /
-`with_dirs` / `with_map` / `with_download` setters.
+`with_dirs` / `with_map` / `with_download` / `with_cache_dir` setters.
 
 Recoverable problems (a skipped asset, a malformed optional field, download
 progress) are reported through the [`log`](https://docs.rs/log) facade
@@ -183,8 +181,8 @@ opaque ones so highlighter sits behind ink.
 - Template backgrounds (ruled lines, dot grids) are not drawn — pages have a
   plain white background. (BOOX fetches these from an external SVG CDN.)
 - A single giant page may exceed a PDF viewer's maximum page size
-  (~200 inch / 14400 pt), or a very large PNG may be skipped, for extremely large
-  notes (raise/lower `--scale` for PNG).
+  (~200 inch / 14400 pt). A very large PNG can exceed the rasterizer's
+  allocation limit and fail with an error; lower `--scale` to render it.
 
 ## References
 

@@ -294,35 +294,30 @@ candidate every *place* a font can come from (inner, `FontDb::find_one`).
 6. The CJK-capable fallback (`FALLBACK_FAMILIES`: Hiragino Sans / PingFang SC
    / Yu Gothic / … through `find_one`, first found).
 
-**OS lookup** (`system-fonts`, in the default feature set; disable via
-`default-features = false` for a pure-Rust build where fonts come only from
-`--fonts-dir`/downloads): the `crates/system-fonts` workspace crate, which
-talks to the platform APIs directly — Core Text on macOS/iOS (descriptor
-matching; misses cleanly, unlike `CTFontCreateWithName`), DirectWrite on
-Windows (via `dwrote`), fontconfig on Linux/FreeBSD (via dlopen, so no build
-dep and graceful absence). Families resolve to a file path + `.ttc` face
-index — exactly what the mmap/subset pipeline needs — landing on the Regular
-face even when the OS ships one file per weight (macOS Hiragino). This finds
-fonts living outside any public font dir: PingFang sits in a private
-framework / on-demand asset on modern macOS/iOS.
+**OS lookup** (`system-fonts`, in the default feature set; `default-features =
+false` gives a pure-Rust build where fonts come only from
+`--fonts-dir`/downloads): the `crates/system-fonts` crate talks to the
+platform APIs directly — Core Text on macOS/iOS (descriptor matching; misses
+cleanly, unlike `CTFontCreateWithName`), DirectWrite on Windows (`dwrote`),
+fontconfig on Linux/FreeBSD (via dlopen, so no build dep and graceful
+absence). Families resolve to a file path + `.ttc` face index, landing on the
+Regular face even when the OS ships one file per weight (macOS Hiragino), and
+reach fonts outside any public dir (PingFang lives in a private framework on
+modern macOS/iOS).
 
-**Per-character fallback.** After a box resolves to a font, each character
-the font has no glyph for is re-resolved by `font_for_char`: first — with
-`system-fonts` — the **OS's system font fallback asked with the actual
-character** (`system_fonts::fallback_for_char`: Core Text's
+**Per-character fallback.** Each character the box's font lacks is re-resolved
+by `font_for_char`: first — with `system-fonts` — the OS fallback **asked with
+the actual character** (`fallback_for_char`: Core Text's
 `CTFontCreateForString`, DirectWrite's `MapCharacters`, fontconfig charset
-matching), so the OS returns a font it considers capable of drawing that
-very character; then the single CJK fallback font (`FALLBACK_FAMILIES`, the
-only per-char fallback when the feature is off). For Han the OS follows the
-user's language settings (ja-first → Hiragino, zh-first → PingFang) unless
-the box's requested family carries a language (`lang_hint`: "Noto Sans CJK
-JP" → `ja`, "…SC" → `zh-Hans`, …), which is passed through so a Japanese
-note stays Japanese-shaped on a Chinese-configured host and vice versa. The
-glyph is still verified against the actual cmap (`advance_em`); answers are
-memoized per (char, lang). Line layout (`render/text.rs`) measures real
-glyph advances from the font that will actually draw each character, and the
-subset collection (`used_chars`)
-mirrors the same per-char choice.
+matching), so the OS returns a font capable of drawing it; then the single CJK
+fallback (`FALLBACK_FAMILIES`, the only per-char fallback with the feature
+off). For Han the OS follows the user's language settings (ja → Hiragino, zh →
+PingFang) unless the requested family carries a language (`lang_hint`: "Noto
+Sans CJK JP" → `ja`, "…SC" → `zh-Hans`), passed through so a Japanese note
+stays Japanese-shaped on a Chinese host and vice versa. The glyph is verified
+against the cmap (`advance_em`); answers are memoized per (char, lang). Line
+layout (`render/text.rs`) measures advances from the font that will actually
+draw each character, and `used_chars` mirrors the same choice.
 
 **Embedding.** PDF embeds a glyph subset per font (subsetting is ours, via
 `allsorts` — printpdf 0.9's own subsetting is disabled upstream); SVG embeds a
@@ -330,13 +325,15 @@ subset `@font-face` as a base64 data URI (with a Unicode cmap — browsers rejec
 Mac-Roman-only); PNG rasterizes glyph outlines with `ttf-parser`.
 
 **Downloads** (`render/download.rs`, `--download-fonts`): fonts land in the
-platform cache dir under `boox-notes-renderer/fonts`, or the directory given
-by `--fonts-cache-dir` / `FontOptions::with_cache_dir`; the cache dir is then
-indexed like a `--fonts-dir` (after the user dirs), so cached fonts resolve
-by their real family names. Two mechanisms: the curated Noto list (fetched
-eagerly, includes Noto Color Emoji) and the full Google Fonts catalog (family
-list cached on disk; per-family files downloaded on demand, static Regular
-preferred, variable fonts at their default instance).
+platform cache dir under `boox-notes-renderer/fonts` (or `--fonts-cache-dir` /
+`FontOptions::with_cache_dir`), which is then indexed like a `--fonts-dir`
+(after the user dirs) so they resolve by real family name. Two mechanisms: the
+curated Noto list (fetched eagerly, includes Noto Color Emoji) and the full
+Google Fonts catalog (family list cached on disk; per-family files on demand,
+static Regular preferred, variable fonts at their default instance). Bytes are
+validated as sfnt (`looks_like_font`) before caching and reuse (`cached_font`),
+so a poisoned entry — error HTML, or a WOFF the sfnt-only embed path can't
+parse — is treated as missing and re-fetched.
 
 **Emoji** (`render/emoji.rs`): single-codepoint emoji are drawn as inline
 images from a color-emoji font's embedded PNG bitmaps (so they render in color
@@ -396,7 +393,8 @@ transformed by the field-8 matrix; stroke width is scaled by its linear scale.
 - A single malformed JSON/field should never abort a whole note: parsers return
   `Option`/warn (`log::warn!`) and continue. Hard failures (not a ZIP, no
   note_info, wrong format, a *required* structure undecodable, page out of
-  range) are the typed `crate::Error` (`src/error.rs`, thiserror).
+  range, a page too large to rasterize, a PNG encode failure) are the typed
+  `crate::Error` (`error.rs`, thiserror).
 - **Public API hygiene** (the crate is also a library): public signatures
   return `crate::Error` — never `anyhow` (CLI-only) and never third-party
   error types (`zip`/`prost` errors are folded into `io::Error`/strings so

@@ -72,8 +72,9 @@ pub(crate) fn fallback_for_char(c: char, lang: Option<&str>) -> Option<FaceRef> 
         }
     };
     let path = url_to_path(unsafe { font.attribute(kCTFontURLAttribute) })?;
-    // Find the exact face Core Text chose; fall back to the family's Regular
-    // when the PostScript name isn't in the file's name table.
+    // Locate the face by the PostScript name Core Text chose; if that name isn't
+    // in the file's name table, fall back (best-effort) to the family's Regular
+    // face — which may not be the exact weight Core Text picked.
     let ps_name = unsafe { font.post_script_name() }.to_string();
     let index = face::index_by_postscript_name(&path, &ps_name).or_else(|| {
         let family = unsafe { font.family_name() }.to_string();

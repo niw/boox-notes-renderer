@@ -15,10 +15,16 @@ use ttf_parser::OutlineBuilder;
 
 use super::fonts::ResolvedFont;
 use super::{Backend, FontOptions, GroupBlend, PageSel, paint_canvas, selected_pages};
+use crate::error::Error;
 use crate::model::{Canvas, Document, Rgba};
 
 /// Render selected note pages to PNG at `scale` px per pt. Returns
 /// `(filename suffix, png bytes)` pairs.
+///
+/// Fails with [`Error::RasterTooLarge`] if a selected page's pixel dimensions
+/// exceed what the rasterizer can allocate, or [`Error::Encode`] if PNG
+/// encoding fails — a page that cannot be produced is an error, not a silent
+/// omission, so the returned vector always covers every selected page.
 pub fn render_png(
     doc: &Document,
     font_opts: &FontOptions,
@@ -36,14 +42,17 @@ pub fn render_png(
     let mut out = Vec::new();
     for (suffix, ci) in selected {
         let canvas = &doc.canvases[ci];
-        let Some(mut be) = PngBackend::new(canvas, scale) else {
-            log::warn!("page too large to rasterize at scale {scale}; skipped");
-            continue;
-        };
+        let mut be = PngBackend::new(canvas, scale).ok_or_else(|| Error::RasterTooLarge {
+            page: ci + 1,
+            width: (canvas.width * scale).ceil().max(1.0) as u32,
+            height: (canvas.height * scale).ceil().max(1.0) as u32,
+        })?;
         paint_canvas(&mut be, canvas, ci, &db);
-        if let Some(bytes) = be.finish() {
-            out.push((suffix, bytes));
-        }
+        let bytes = be.finish().map_err(|detail| Error::Encode {
+            page: ci + 1,
+            detail,
+        })?;
+        out.push((suffix, bytes));
     }
     Ok(out)
 }
@@ -78,9 +87,10 @@ impl PngBackend {
         })
     }
 
-    fn finish(mut self) -> Option<Vec<u8>> {
+    fn finish(mut self) -> std::result::Result<Vec<u8>, String> {
         self.layers.drain(1..); // discard any unclosed groups
-        self.layers.pop().and_then(|p| p.encode_png().ok())
+        let base = self.layers.pop().expect("base layer always present");
+        base.encode_png().map_err(|e| e.to_string())
     }
 
     fn cur(&mut self) -> &mut Pixmap {
@@ -242,6 +252,11 @@ impl Backend for PngBackend {
                 face.outline_glyph(gid, &mut o);
                 let adv = face.glyph_hor_advance(gid).unwrap_or(0) as f32;
                 pen += adv * fscale;
+            } else {
+                // The font lacks this glyph (tofu). Advance by the same heuristic
+                // text-layout measured the char with, so the rest of the line
+                // stays aligned with the PDF/SVG backends instead of bunching up.
+                pen += super::text::char_em(ch) * size;
             }
         }
         if let Some(path) = pb.finish() {
@@ -253,10 +268,11 @@ impl Backend for PngBackend {
                 Transform::identity(),
                 None,
             );
-            // Faux bold: stroke the outline on top of the fill.
+            // Faux bold: stroke the outline on top of the fill (same weight as
+            // the PDF backend; the path is in px, so scale the pt ratio by scale).
             if bold {
                 let stroke = Stroke {
-                    width: (size * self.scale * 0.06).max(1.0),
+                    width: (size * self.scale * super::FAUX_BOLD_RATIO).max(1.0),
                     line_cap: LineCap::Round,
                     line_join: LineJoin::Round,
                     ..Default::default()
